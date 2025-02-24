@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,29 +16,34 @@ import (
 )
 
 type Task struct {
-	ID      int64  `db:"id"`
-	Date    string `db:"date"`
-	Title   string `db:"title"`
-	Comment string `db:"comment"`
-	Repeat  string `db:"repeat"`
+	ID      int64  `json:"id"`
+	Date    string `json:"date"`
+	Title   string `json:"title"`
+	Comment string `json:"comment"`
+	Repeat  string `json:"repeat"`
 }
 
-func createTables(db *sql.DB) error {
-	query := `
-	CREATE TABLE scheduler (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		date TEXT NOT NULL,
-		title TEXT NOT NULL,
-		comment TEXT,
-		repeat TEXT
-	);
-	CREATE INDEX idx_date ON scheduler (date);`
+var db *sql.DB
+
+func createTables() error {
+	query := `CREATE TABLE IF NOT EXISTS scheduler (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        title TEXT NOT NULL,
+        comment TEXT,
+        repeat TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_date ON scheduler (date);`
 
 	_, err := db.Exec(query)
 	return err
 }
 
 func NextDate(now time.Time, dateStr, repeat string) (string, error) {
+	if repeat == "" {
+		return "", nil
+	}
+
 	parsedDate, err := time.Parse("20060102", dateStr)
 	if err != nil {
 		return "", fmt.Errorf("invalid date: %v", err)
@@ -59,61 +65,31 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		for {
 			nextDate = nextDate.AddDate(0, 0, days)
 			if nextDate.After(now) {
-				break
+				return nextDate.Format("20060102"), nil
 			}
 		}
-		return nextDate.Format("20060102"), nil
 
 	case repeat == "y":
-		nextDate := parsedDate.AddDate(1, 0, 0)
-		if parsedDate.Month() == time.February && parsedDate.Day() == 29 {
-			if !isLeap(nextDate.Year()) {
-				nextDate = time.Date(nextDate.Year(), time.March, 1, 0, 0, 0, 0, nextDate.Location())
+		nextDate := parsedDate
+		for {
+			nextDate = nextDate.AddDate(1, 0, 0)
+			if parsedDate.Month() == time.February && parsedDate.Day() == 29 {
+				if !isLeap(nextDate.Year()) {
+					nextDate = nextDate.AddDate(0, 0, 1)
+				}
+			}
+			if nextDate.After(now) {
+				return nextDate.Format("20060102"), nil
 			}
 		}
-		return nextDate.Format("20060102"), nil
 
 	default:
-		if repeat != "" {
-			return "", fmt.Errorf("unsupported repeat rule")
-		}
-		return "", nil
+		return "", fmt.Errorf("unsupported repeat rule")
 	}
 }
 
 func isLeap(year int) bool {
 	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
-}
-
-func handleNextDate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	nowStr := r.FormValue("now")
-	dateStr := r.FormValue("date")
-	repeat := r.FormValue("repeat")
-
-	if nowStr == "" || dateStr == "" || repeat == "" {
-		respondError(w, "missing parameters", http.StatusBadRequest)
-		return
-	}
-
-	now, err := time.Parse("20060102", nowStr)
-	if err != nil {
-		respondError(w, "invalid 'now' parameter", http.StatusBadRequest)
-		return
-	}
-
-	nextDate, err := NextDate(now, dateStr, repeat)
-	if err != nil {
-		respondError(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte(nextDate))
 }
 
 func handleTask(w http.ResponseWriter, r *http.Request) {
@@ -122,131 +98,127 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var taskInput struct {
-		Date    string `json:"date"`
-		Title   string `json:"title"`
-		Comment string `json:"comment"`
-		Repeat  string `json:"repeat"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&taskInput); err != nil {
-		respondError(w, "Ошибка десериализации JSON", http.StatusBadRequest)
+	var task Task
+	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		respondError(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	if taskInput.Title == "" {
-		respondError(w, "Не указан заголовок задачи", http.StatusBadRequest)
+	if task.Title == "" {
+		respondError(w, "Title is required", http.StatusBadRequest)
 		return
 	}
 
-	// Основная логика обработки даты
 	now := time.Now().UTC()
-	today := now.Format("20060102")
-	finalDate := taskInput.Date
-
-	// Если дата не указана - использовать сегодня
-	if finalDate == "" {
-		finalDate = today
+	if task.Date == "" || task.Date == "today" {
+		task.Date = now.Format("20060102")
 	}
 
-	// Парсим и проверяем формат даты
-	parsedDate, err := time.Parse("20060102", finalDate)
+	parsedDate, err := time.Parse("20060102", task.Date)
 	if err != nil {
-		respondError(w, "invalid date format", http.StatusBadRequest)
+		respondError(w, "Invalid date format", http.StatusBadRequest)
 		return
 	}
 
-	// Проверяем правило повторения
-	if taskInput.Repeat != "" {
-		_, err = NextDate(now, finalDate, taskInput.Repeat)
+	//
+	if parsedDate.Before(now) {
+		task.Date = now.Format("20060102")
+		parsedDate = now
+	}
+
+	//
+	if !parsedDate.Before(now) && task.Repeat != "" {
+		next, err := NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			respondError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	}
-
-	// Корректируем дату если она в прошлом
-	if parsedDate.Before(now) {
-		if taskInput.Repeat == "" {
-			finalDate = today
-		} else {
-			next, err := NextDate(now, finalDate, taskInput.Repeat)
-			if err != nil {
-				respondError(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			finalDate = next
+		if next != "" {
+			task.Date = next
 		}
 	}
 
-	// Подключаемся к БД
-	db, err := sql.Open("sqlite3", getDBPath())
-	if err != nil {
-		respondError(w, "Database error", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
-
-	// Вставляем задачу
 	res, err := db.Exec(
 		`INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)`,
-		finalDate,
-		taskInput.Title,
-		taskInput.Comment,
-		taskInput.Repeat,
+		task.Date, task.Title, task.Comment, task.Repeat,
 	)
 	if err != nil {
-		respondError(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	id, _ := res.LastInsertId()
-	respondJSON(w, map[string]string{"id": strconv.FormatInt(id, 10)})
+	respondJSON(w, map[string]int64{"id": id})
+}
+
+func handleNextDate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	nowStr := r.URL.Query().Get("now")
+	dateStr := r.URL.Query().Get("date")
+	repeat := r.URL.Query().Get("repeat")
+
+	now, err := time.Parse("20060102", nowStr)
+	if err != nil {
+		now = time.Now().UTC()
+	}
+
+	nextDate, err := NextDate(now, dateStr, repeat)
+	if err != nil {
+		respondError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, map[string]string{"date": nextDate})
 }
 
 func respondJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
 
 func respondError(w http.ResponseWriter, message string, code int) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 func getDBPath() string {
-	if path := os.Getenv("TODO_DBFILE"); path != "" {
-		return path
+	if customPath := os.Getenv("TODO_DBFILE"); customPath != "" {
+		return customPath
 	}
-	return "scheduler.db"
+
+	appPath, _ := os.Getwd()
+	return filepath.Join(appPath, "scheduler.db")
 }
 
 func main() {
-	port := os.Getenv("TODO_PORT")
-	if port == "" {
-		port = "7540"
-	}
-
 	// Инициализация БД
-	db, err := sql.Open("sqlite3", getDBPath())
+	var err error
+	dbPath := getDBPath()
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	if _, err := os.Stat(getDBPath()); os.IsNotExist(err) {
-		if err := createTables(db); err != nil {
-			log.Fatal("Ошибка создания БД:", err)
-		}
-		log.Println("База данных инициализирована")
+	if err := createTables(); err != nil {
+		log.Fatal("Failed to create tables:", err)
 	}
 
-	// Роутинг
+	// Настройка сервера
+	port := os.Getenv("TODO_PORT")
+	if port == "" {
+		port = "7540"
+	}
+
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 	http.HandleFunc("/api/nextdate", handleNextDate)
 	http.HandleFunc("/api/task", handleTask)
 
-	log.Printf("Сервер запущен на порту %s", port)
+	log.Printf("Server started on port %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
