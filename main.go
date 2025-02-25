@@ -15,103 +15,116 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Task представляет структуру задачи
 type Task struct {
-	ID      string `json:"id"`      // Уникальный идентификатор задачи
-	Date    string `json:"date"`    // Дата выполнения задачи в формате YYYYMMDD
-	Title   string `json:"title"`   // Заголовок задачи
-	Comment string `json:"comment"` // Комментарий к задаче
-	Repeat  string `json:"repeat"`  // Правило повторения задачи (d N - каждый N дней, y - каждый год)
+	ID      string `json:"id"`
+	Date    string `json:"date"`
+	Title   string `json:"title"`
+	Comment string `json:"comment"`
+	Repeat  string `json:"repeat"`
 }
 
-// Глобальная переменная для хранения экземпляра БД
 var db *sql.DB
 
-// createTables создает таблицы в базе данных, если они не существуют
 func createTables() error {
 	query := `CREATE TABLE IF NOT EXISTS scheduler (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        title TEXT NOT NULL,
-        comment TEXT,
-        repeat TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_date ON scheduler (date);` // Создаем индекс для быстрого поиска задач по дате
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		date TEXT NOT NULL,
+		title TEXT NOT NULL,
+		comment TEXT,
+		repeat TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_date ON scheduler (date);`
 
-	_, err := db.Exec(query) // Выполняем SQL-запрос
+	_, err := db.Exec(query)
 	return err
 }
 
-// NextDate вычисляет следующую дату выполнения задачи на основе правила повторения
 func NextDate(now time.Time, dateStr, repeat string) (string, error) {
-	// Если правило повторения не задано, возвращаем пустую строку и nil error
 	if repeat == "" {
 		return "", nil
 	}
 
-	// Парсим строку с датой в объект time.Time
 	parsedDate, err := time.Parse("20060102", dateStr)
 	if err != nil {
-		return "", fmt.Errorf("invalid date: %v", err) // Возвращаем ошибку, если дата имеет неверный формат
+		return "", fmt.Errorf("invalid date: %v", err)
 	}
 
-	// Обрабатываем правило повторения
 	switch {
-	// Если правило начинается с "d " (каждые несколько дней)
 	case strings.HasPrefix(repeat, "d "):
-		parts := strings.Split(repeat, " ") // Разбиваем строку на части по пробелу
+		parts := strings.Split(repeat, " ")
 		if len(parts) != 2 {
-			return "", fmt.Errorf("invalid repeat format") // Возвращаем ошибку, если формат правила неверен
+			return "", fmt.Errorf("invalid repeat format")
 		}
 
-		days, err := strconv.Atoi(parts[1]) // Преобразуем количество дней в число
+		days, err := strconv.Atoi(parts[1])
 		if err != nil || days < 1 || days > 400 {
-			return "", fmt.Errorf("invalid days value") // Возвращаем ошибку, если количество дней не является числом или находится вне допустимого диапазона
+			return "", fmt.Errorf("invalid days value")
 		}
 
-		// Вычисляем следующую дату, добавляя дни до тех пор, пока она не станет больше или равна текущей дате
 		nextDate := parsedDate
 		for nextDate.Before(now) || nextDate.Equal(now) {
-			nextDate = nextDate.AddDate(0, 0, days) // Добавляем указанное количество дней
+			nextDate = nextDate.AddDate(0, 0, days)
 		}
-		return nextDate.Format("20060102"), nil // Возвращаем следующую дату в формате YYYYMMDD
+		return nextDate.Format("20060102"), nil
 
-	// Если правило равно "y" (каждый год)
 	case repeat == "y":
 		nextDate := parsedDate
-		// Вычисляем следующую дату, добавляя год до тех пор, пока она не станет больше текущей даты
 		for {
-			nextDate = nextDate.AddDate(1, 0, 0) // Добавляем один год
-
-			// Корректируем дату, если исходная дата - 29 февраля невисокосного года
+			nextDate = nextDate.AddDate(1, 0, 0)
 			if parsedDate.Month() == time.February && parsedDate.Day() == 29 {
 				if !isLeap(nextDate.Year()) {
-					nextDate = nextDate.AddDate(0, 0, 1) // Переносим на 1 марта
+					nextDate = nextDate.AddDate(0, 0, 1)
 				}
 			}
 			if nextDate.After(now) {
-				return nextDate.Format("20060102"), nil // Возвращаем следующую дату в формате YYYYMMDD
+				return nextDate.Format("20060102"), nil
 			}
 		}
 
-	// Если правило не поддерживается
 	default:
-		return "", fmt.Errorf("unsupported repeat rule") // Возвращаем ошибку
+		return "", fmt.Errorf("unsupported repeat rule")
 	}
 }
-
-// isLeap проверяет, является ли год високосным
 func isLeap(year int) bool {
 	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
-// handleTask обрабатывает запросы к эндпоинту /api/task (добавление задач)
-func handleTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+func handleNextDate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	date := r.URL.Query().Get("date")
+	repeat := r.URL.Query().Get("repeat")
+
+	if date == "" || repeat == "" {
+		respondError(w, "Missing date or repeat parameter", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	nextDate, err := NextDate(now, date, repeat)
+	if err != nil {
+		respondError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	respondJSON(w, map[string]string{"date": nextDate})
+}
+
+func handleTask(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		handleCreateTask(w, r)
+	case http.MethodGet, http.MethodPut:
+		handleTaskRoutes(w, r)
+	default:
+		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var task Task
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
 		respondError(w, "Invalid JSON", http.StatusBadRequest)
@@ -123,13 +136,9 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Всегда получаем актуальное время для каждой задачи
 	now := time.Now().UTC()
-	today := now.Format("20060102")
-
-	// Обработка даты задачи
-	if task.Date == "" || task.Date == "today" {
-		task.Date = today
+	if task.Date == "" {
+		task.Date = now.Format("20060102")
 	}
 
 	parsedDate, err := time.Parse("20060102", task.Date)
@@ -138,24 +147,17 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Нормализация дат до начала суток
-	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	taskDate := parsedDate.UTC().Truncate(24 * time.Hour)
-
-	// Корректировка даты только если задача без повтора и дата в прошлом
-	if task.Repeat == "" && taskDate.Before(nowDate) {
-		task.Date = today
-	} else if task.Repeat != "" {
-		// Для повторяющихся задач всегда вычисляем следующую дату
+	if task.Repeat != "" {
 		next, err := NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			respondError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		task.Date = next
+	} else if parsedDate.Before(now) {
+		task.Date = now.Format("20060102")
 	}
 
-	// Вставка в БД
 	res, err := db.Exec(
 		`INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)`,
 		task.Date, task.Title, task.Comment, task.Repeat,
@@ -168,8 +170,109 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 	id, _ := res.LastInsertId()
 	respondJSON(w, map[string]string{"id": strconv.FormatInt(id, 10)})
 }
+func handleTaskRoutes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		handleGetTask(w, r)
+	case http.MethodPut:
+		handleUpdateTask(w, r)
+	default:
+		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
 
-// handleTasks возвращает список задач с возможностью поиска
+func handleGetTask(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		respondError(w, "Не указан идентификатор", http.StatusBadRequest)
+		return
+	}
+
+	var task Task
+	row := db.QueryRow(
+		`SELECT id, date, title, comment, repeat 
+		FROM scheduler WHERE id = ?`,
+		id,
+	)
+
+	var dbID int64
+	err := row.Scan(&dbID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondError(w, "Задача не найдена", http.StatusNotFound)
+		} else {
+			respondError(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	task.ID = strconv.FormatInt(dbID, 10)
+	respondJSON(w, task)
+}
+
+func handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	var task Task
+	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		respondError(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if task.ID == "" {
+		respondError(w, "Не указан идентификатор", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(task.ID, 10, 64)
+	if err != nil {
+		respondError(w, "Invalid task ID", http.StatusBadRequest)
+		return
+	}
+
+	var exists bool
+	db.QueryRow("SELECT EXISTS(SELECT 1 FROM scheduler WHERE id = ?)", id).Scan(&exists)
+	if !exists {
+		respondError(w, "Задача не найдена", http.StatusNotFound)
+		return
+	}
+
+	now := time.Now().UTC()
+	if task.Title == "" {
+		respondError(w, "Title is required", http.StatusBadRequest)
+		return
+	}
+
+	parsedDate, err := time.Parse("20060102", task.Date)
+	if err != nil {
+		respondError(w, "Invalid date format", http.StatusBadRequest)
+		return
+	}
+
+	if task.Repeat != "" {
+		next, err := NextDate(now, task.Date, task.Repeat)
+		if err != nil {
+			respondError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		task.Date = next
+	} else if parsedDate.Before(now) {
+		task.Date = now.Format("20060102")
+	}
+
+	_, err = db.Exec(
+		`UPDATE scheduler 
+		SET date = ?, title = ?, comment = ?, repeat = ?
+		WHERE id = ?`,
+		task.Date, task.Title, task.Comment, task.Repeat, id,
+	)
+
+	if err != nil {
+		respondError(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]interface{}{})
+}
+
 func handleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -179,26 +282,62 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 	limit := 50
 
-	var tasks []Task
+	var rows *sql.Rows
 	var err error
 
 	if search != "" {
-		// Попытка парсинга даты формата DD.MM.YYYY
 		if date, err := time.Parse("02.01.2006", search); err == nil {
-			tasks, err = getTasksByDate(date.Format("20060102"), limit)
+			rows, err = db.Query(
+				`SELECT id, date, title, comment, repeat 
+				FROM scheduler 
+				WHERE date = ? 
+				ORDER BY date 
+				LIMIT ?`,
+				date.Format("20060102"),
+				limit,
+			)
 		} else {
-			tasks, err = searchTasks(search, limit)
+			searchPattern := "%" + search + "%"
+			rows, err = db.Query(
+				`SELECT id, date, title, comment, repeat 
+				FROM scheduler 
+				WHERE title LIKE ? OR comment LIKE ? 
+				ORDER BY date 
+				LIMIT ?`,
+				searchPattern,
+				searchPattern,
+				limit,
+			)
 		}
 	} else {
-		tasks, err = getAllTasks(limit)
+		rows, err = db.Query(
+			`SELECT id, date, title, comment, repeat 
+			FROM scheduler 
+			ORDER BY date 
+			LIMIT ?`,
+			limit,
+		)
 	}
 
 	if err != nil {
 		respondError(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+	defer rows.Close()
 
-	// Гарантируем возврат пустого массива вместо null
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		var id int64
+		var t Task
+		err := rows.Scan(&id, &t.Date, &t.Title, &t.Comment, &t.Repeat)
+		if err != nil {
+			respondError(w, "Error reading tasks", http.StatusInternalServerError)
+			return
+		}
+		t.ID = strconv.FormatInt(id, 10)
+		tasks = append(tasks, t)
+	}
+
 	if tasks == nil {
 		tasks = make([]Task, 0)
 	}
@@ -206,133 +345,47 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string][]Task{"tasks": tasks})
 }
 
-// Вспомогательные функции для запросов
-func getAllTasks(limit int) ([]Task, error) {
-	return queryTasks("", limit)
-}
-
-func getTasksByDate(date string, limit int) ([]Task, error) {
-	return queryTasks("date = ?", limit, date)
-}
-
-func searchTasks(query string, limit int) ([]Task, error) {
-	pattern := "%" + query + "%"
-	return queryTasks("title LIKE ? OR comment LIKE ?", limit, pattern, pattern)
-}
-
-func queryTasks(where string, limit int, args ...interface{}) ([]Task, error) {
-	q := `SELECT id, date, title, comment, repeat FROM scheduler`
-	if where != "" {
-		q += " WHERE " + where
-	}
-	q += " ORDER BY date LIMIT ?"
-
-	args = append(args, limit)
-
-	rows, err := db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []Task
-	for rows.Next() {
-		var id int64
-		var t Task
-		err := rows.Scan(&id, &t.Date, &t.Title, &t.Comment, &t.Repeat)
-		if err != nil {
-			return nil, err
-		}
-		t.ID = strconv.FormatInt(id, 10) // Конвертируем ID в строку
-		tasks = append(tasks, t)
-	}
-	return tasks, nil
-}
-
-// handleNextDate обрабатывает запросы к эндпоинту /api/nextdate (вычисление следующей даты)
-func handleNextDate(w http.ResponseWriter, r *http.Request) {
-	// Проверяем метод запроса (должен быть GET)
-	if r.Method != http.MethodGet {
-		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Получаем параметры запроса из URL
-	nowStr := r.URL.Query().Get("now")    // Текущая дата
-	dateStr := r.URL.Query().Get("date")  // Дата задачи
-	repeat := r.URL.Query().Get("repeat") // Правило повторения
-
-	// Если не удалось распарсить дату, устанавливаем текущую дату
-	now, err := time.Parse("20060102", nowStr)
-	if err != nil {
-		now = time.Now().UTC()
-	}
-
-	// Вычисляем следующую дату с помощью функции NextDate
-	nextDate, err := NextDate(now, dateStr, repeat)
-	if err != nil {
-		respondError(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Отправляем JSON-ответ со следующей датой
-	respondJSON(w, map[string]string{"date": nextDate})
-}
-
-// respondJSON отправляет JSON-ответ
 func respondJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
 
-// respondError отправляет JSON-ответ с ошибкой
 func respondError(w http.ResponseWriter, message string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// getDBPath определяет путь к файлу базы данных
 func getDBPath() string {
-	// Если переменная окружения TODO_DBFILE установлена, используем её
 	if customPath := os.Getenv("TODO_DBFILE"); customPath != "" {
 		return customPath
 	}
-
-	// Иначе используем путь по умолчанию (scheduler.db в текущей директории)
-	appPath, _ := os.Getwd()
-	return filepath.Join(appPath, "scheduler.db")
+	return filepath.Join(".", "scheduler.db")
 }
 
-// main - основная функция приложения
 func main() {
-	// Инициализация БД
+	dbPath := getDBPath()
 	var err error
-	dbPath := getDBPath()                 // Получаем путь к файлу БД
-	db, err = sql.Open("sqlite3", dbPath) // Открываем соединение с БД SQLite3
+	db, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
-		log.Fatal(err) // Если не удалось открыть соединение, завершаем программу с ошибкой
+		log.Fatal(err)
 	}
-	defer db.Close() // Закрываем соединение с БД при завершении работы программы
+	defer db.Close()
 
-	// Создаем таблицы, если они не существуют
 	if err := createTables(); err != nil {
-		log.Fatal("Failed to create tables:", err) // Если не удалось создать таблицы, завершаем программу с ошибкой
+		log.Fatal("Failed to create tables:", err)
 	}
 
-	// Настройка сервера
-	port := os.Getenv("TODO_PORT") // Получаем номер порта из переменной окружения TODO_PORT
+	port := os.Getenv("TODO_PORT")
 	if port == "" {
-		port = "7540" // Если переменная не установлена, используем порт 7540 по умолчанию
+		port = "7540"
 	}
 
-	// Регистрируем обработчики HTTP
-	http.Handle("/", http.FileServer(http.Dir("./web"))) // Файловый сервер для статических файлов (HTML, CSS, JS)
-	http.HandleFunc("/api/nextdate", handleNextDate)     // Обработчик для эндпоинта /api/nextdate
-	http.HandleFunc("/api/task", handleTask)             // Обработчик для эндпоинта /api/task
+	http.Handle("/", http.FileServer(http.Dir("./web")))
+	http.HandleFunc("/api/nextdate", handleNextDate)
+	http.HandleFunc("/api/task", handleTask)
 	http.HandleFunc("/api/tasks", handleTasks)
 
-	// Запускаем HTTP-сервер
-	log.Printf("Server started on port %s", port) // Выводим сообщение о запуске сервера
-	log.Fatal(http.ListenAndServe(":"+port, nil)) // Запускаем сервер и ждем входящие соединения. Если произошла ошибка, завершаем программу.
+	log.Printf("Server started on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
