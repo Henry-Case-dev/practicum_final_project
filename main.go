@@ -17,7 +17,7 @@ import (
 
 // Task представляет структуру задачи
 type Task struct {
-	ID      int64  `json:"id"`      // Уникальный идентификатор задачи
+	ID      string `json:"id"`      // Уникальный идентификатор задачи
 	Date    string `json:"date"`    // Дата выполнения задачи в формате YYYYMMDD
 	Title   string `json:"title"`   // Заголовок задачи
 	Comment string `json:"comment"` // Комментарий к задаче
@@ -166,7 +166,87 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, _ := res.LastInsertId()
-	respondJSON(w, map[string]int64{"id": id})
+	respondJSON(w, map[string]string{"id": strconv.FormatInt(id, 10)})
+}
+
+// handleTasks возвращает список задач с возможностью поиска
+func handleTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	search := r.URL.Query().Get("search")
+	limit := 50
+
+	var tasks []Task
+	var err error
+
+	if search != "" {
+		// Попытка парсинга даты формата DD.MM.YYYY
+		if date, err := time.Parse("02.01.2006", search); err == nil {
+			tasks, err = getTasksByDate(date.Format("20060102"), limit)
+		} else {
+			tasks, err = searchTasks(search, limit)
+		}
+	} else {
+		tasks, err = getAllTasks(limit)
+	}
+
+	if err != nil {
+		respondError(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Гарантируем возврат пустого массива вместо null
+	if tasks == nil {
+		tasks = make([]Task, 0)
+	}
+
+	respondJSON(w, map[string][]Task{"tasks": tasks})
+}
+
+// Вспомогательные функции для запросов
+func getAllTasks(limit int) ([]Task, error) {
+	return queryTasks("", limit)
+}
+
+func getTasksByDate(date string, limit int) ([]Task, error) {
+	return queryTasks("date = ?", limit, date)
+}
+
+func searchTasks(query string, limit int) ([]Task, error) {
+	pattern := "%" + query + "%"
+	return queryTasks("title LIKE ? OR comment LIKE ?", limit, pattern, pattern)
+}
+
+func queryTasks(where string, limit int, args ...interface{}) ([]Task, error) {
+	q := `SELECT id, date, title, comment, repeat FROM scheduler`
+	if where != "" {
+		q += " WHERE " + where
+	}
+	q += " ORDER BY date LIMIT ?"
+
+	args = append(args, limit)
+
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var id int64
+		var t Task
+		err := rows.Scan(&id, &t.Date, &t.Title, &t.Comment, &t.Repeat)
+		if err != nil {
+			return nil, err
+		}
+		t.ID = strconv.FormatInt(id, 10) // Конвертируем ID в строку
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
 }
 
 // handleNextDate обрабатывает запросы к эндпоинту /api/nextdate (вычисление следующей даты)
@@ -250,6 +330,7 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("./web"))) // Файловый сервер для статических файлов (HTML, CSS, JS)
 	http.HandleFunc("/api/nextdate", handleNextDate)     // Обработчик для эндпоинта /api/nextdate
 	http.HandleFunc("/api/task", handleTask)             // Обработчик для эндпоинта /api/task
+	http.HandleFunc("/api/tasks", handleTasks)
 
 	// Запускаем HTTP-сервер
 	log.Printf("Server started on port %s", port) // Выводим сообщение о запуске сервера
