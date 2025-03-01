@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"practicum_final_project/database"
 	"practicum_final_project/utils"
 )
 
@@ -18,11 +19,11 @@ func HandleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
+	_, err := database.DB.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
 	if err != nil {
 		utils.RespondError(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	utils.RespondJSON(w, map[string]interface{}{})
+	utils.RespondJSON(w, map[string]string{"result": "ok"}) // Не пустой ответ
 }

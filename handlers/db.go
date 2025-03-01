@@ -4,8 +4,9 @@ import (
 	"database/sql"
 )
 
-var db *sql.DB
+var DB *sql.DB
 
+// InitDB инициализирует соединение с БД для хендлеров.
 func InitDB(database *sql.DB) {
-	db = database
+	DB = database
 }

@@ -1,53 +1,63 @@
 package main
 
 import (
-	"database/sql"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
+	"practicum_final_project/database"
 	"practicum_final_project/handlers"
-	"practicum_final_project/utils"
-
-	_ "github.com/mattn/go-sqlite3"
+	"practicum_final_project/tests"
 )
 
-// db - глобальная переменная для подключения к базе данных
-var db *sql.DB
-
 func main() {
-	// Получаем путь к базе данных
-	dbPath := utils.GetDBPath()
-	var err error
-	db, err = sql.Open("sqlite3", dbPath)
+	// Используем путь к БД из settings.go
+	dbPath := tests.DBFile
+	if envPath := os.Getenv("TODO_DBFILE"); envPath != "" {
+		dbPath = envPath
+	}
+
+	// Инициализируем БД
+	if err := database.Init(dbPath); err != nil {
+		log.Fatalf("Ошибка инициализации базы данных: %v", err)
+	}
+	defer database.DB.Close()
+
+	// Инициализируем handlers
+	handlers.InitDB(database.DB)
+
+	// Определяем директорию web относительно текущей
+	currentDir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
 
-	// Инициализируем базу данных в пакете handlers
-	handlers.InitDB(db)
-
-	// Создаем таблицы, если они не существуют
-	if err := utils.CreateTables(db); err != nil {
-		log.Fatal("Failed to create tables:", err)
+	// Путь к директории web
+	webDir := filepath.Join(currentDir, "web")
+	if _, err := os.Stat(webDir); err != nil {
+		// Если web не найдена в текущей директории, ищем в родительской
+		webDir = filepath.Join(filepath.Dir(currentDir), "web")
+		if _, err := os.Stat(webDir); err != nil {
+			log.Fatalf("Ошибка: директория web не найдена")
+		}
 	}
 
-	// Получаем порт для сервера из переменной окружения
+	// Файловый сервер для фронтенда
+	http.Handle("/", http.FileServer(http.Dir(webDir)))
+
+	// Регистрируем API-обработчики
+	http.HandleFunc("/api/task", handlers.HandleTask)
+	http.HandleFunc("/api/tasks", handlers.HandleTasks)
+	http.HandleFunc("/api/nextdate", handlers.HandleNextDate)
+	http.HandleFunc("/api/task/done", handlers.HandleTaskDone)
+	http.HandleFunc("/api/task/delete", handlers.HandleDeleteTask)
+
+	// Определяем порт
 	port := os.Getenv("TODO_PORT")
 	if port == "" {
 		port = "7540"
 	}
-
-	// Настраиваем маршруты для HTTP-запросов
-	http.Handle("/", http.FileServer(http.Dir("./web")))
-	http.HandleFunc("/api/nextdate", handlers.HandleNextDate)
-	http.HandleFunc("/api/task", handlers.HandleTask)
-	http.HandleFunc("/api/tasks", handlers.HandleTasks)
-	http.HandleFunc("/api/task/done", handlers.HandleTaskDone)
-	http.HandleFunc("/api/task/delete", handlers.HandleDeleteTask)
-
-	// Запускаем сервер
-	log.Printf("Server started on port %s", port)
+	log.Printf("Сервер запущен на порту %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }

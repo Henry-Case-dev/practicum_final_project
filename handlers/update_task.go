@@ -10,11 +10,11 @@ import (
 	"practicum_final_project/utils"
 )
 
-// HandleUpdateTask обрабатывает обновление задачи
+// HandleUpdateTask обновляет существующую задачу.
 func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var task models.Task
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
-		utils.RespondError(w, "Invalid JSON", http.StatusBadRequest)
+		utils.RespondError(w, "Неверный формат JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -22,52 +22,54 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		utils.RespondError(w, "Не указан идентификатор", http.StatusBadRequest)
 		return
 	}
+	if task.Title == "" {
+		utils.RespondError(w, "Заголовок задачи обязателен", http.StatusBadRequest)
+		return
+	}
 
 	id, err := strconv.ParseInt(task.ID, 10, 64)
 	if err != nil {
-		utils.RespondError(w, "Invalid task ID", http.StatusBadRequest)
+		utils.RespondError(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
 	var exists bool
-	db.QueryRow("SELECT EXISTS(SELECT 1 FROM scheduler WHERE id = ?)", id).Scan(&exists)
+	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM scheduler WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		utils.RespondError(w, "Ошибка базы данных", http.StatusInternalServerError)
+		return
+	}
 	if !exists {
 		utils.RespondError(w, "Задача не найдена", http.StatusNotFound)
 		return
 	}
 
-	now := time.Now().UTC()
-	if task.Title == "" {
-		utils.RespondError(w, "Title is required", http.StatusBadRequest)
-		return
-	}
-
+	now := time.Now().UTC().Truncate(24 * time.Hour)
 	parsedDate, err := time.Parse("20060102", task.Date)
 	if err != nil {
-		utils.RespondError(w, "Invalid date format", http.StatusBadRequest)
+		utils.RespondError(w, "Неверный формат даты", http.StatusBadRequest)
 		return
 	}
 
 	if task.Repeat != "" {
-		next, err := utils.NextDate(now, task.Date, task.Repeat)
+		nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
 		if err != nil {
 			utils.RespondError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		task.Date = next
+		task.Date = nextDate
 	} else if parsedDate.Before(now) {
-		task.Date = now.Format("20060102")
+		// Если правило повторения не указано, выдаём ошибку.
+		utils.RespondError(w, "Дата не может быть меньше сегодняшней", http.StatusBadRequest)
+		return
 	}
 
-	_, err = db.Exec(
-		`UPDATE scheduler 
-        SET date = ?, title = ?, comment = ?, repeat = ? 
-        WHERE id = ?`,
+	_, err = DB.Exec(
+		`UPDATE scheduler SET date = ?, title = ?, comment = ?, repeat = ? WHERE id = ?`,
 		task.Date, task.Title, task.Comment, task.Repeat, id,
 	)
-
 	if err != nil {
-		utils.RespondError(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		utils.RespondError(w, "Ошибка базы данных: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
