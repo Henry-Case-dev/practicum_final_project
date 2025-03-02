@@ -8,15 +8,17 @@ import (
 
 	"practicum_final_project/database"
 	"practicum_final_project/handlers"
-	"practicum_final_project/tests"
 )
 
 func main() {
-	// Используем путь к БД из settings.go
-	dbPath := tests.DBFile
-	if envPath := os.Getenv("TODO_DBFILE"); envPath != "" {
-		dbPath = envPath
+	// Получаем рабочий каталог
+	appPath, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	// Формируем путь к базе данных (scheduler.db должен находиться в корне проекта)
+	dbPath := filepath.Join(appPath, "scheduler.db")
 
 	// Инициализируем БД
 	if err := database.Init(dbPath); err != nil {
@@ -24,23 +26,13 @@ func main() {
 	}
 	defer database.DB.Close()
 
-	// Инициализируем handlers
+	// Инициализируем handlers с подключением к БД
 	handlers.InitDB(database.DB)
 
-	// Определяем директорию web относительно текущей
-	currentDir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Путь к директории web
-	webDir := filepath.Join(currentDir, "web")
+	// Формируем путь к директории web (корень проекта)
+	webDir := filepath.Join(appPath, "web")
 	if _, err := os.Stat(webDir); err != nil {
-		// Если web не найдена в текущей директории, ищем в родительской
-		webDir = filepath.Join(filepath.Dir(currentDir), "web")
-		if _, err := os.Stat(webDir); err != nil {
-			log.Fatalf("Ошибка: директория web не найдена")
-		}
+		log.Fatalf("Ошибка: директория web не найдена")
 	}
 
 	// Файловый сервер для фронтенда
