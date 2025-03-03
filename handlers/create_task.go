@@ -24,8 +24,8 @@ func HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Truncate(24 * time.Hour)
-	// Если дата не указана, используем сегодняшнюю.
-	if task.Date == "" {
+	// Если дата не указана или передано ключевое слово "today", используем сегодняшнее число.
+	if task.Date == "" || task.Date == "today" {
 		task.Date = now.Format("20060102")
 	}
 
@@ -35,15 +35,15 @@ func HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Если правило повторения указано, то поле date должно равняться сегодняшнему числу.
 	if task.Repeat != "" {
-		nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
-		if err != nil {
-			utils.RespondError(w, err.Error(), http.StatusBadRequest)
+		if task.Date != now.Format("20060102") {
+			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
 			return
 		}
-		task.Date = nextDate
+		// Для повторяющихся задач оставляем дату равной сегодняшней.
 	} else if parsedDate.Before(now) {
-		// Если правило повторения не указано, выдаём ошибку, если дата меньше сегодняшней.
+		// Если правило повторения не указано и дата меньше сегодняшнего, выдаём ошибку.
 		utils.RespondError(w, "Дата не может быть меньше сегодняшней", http.StatusBadRequest)
 		return
 	}

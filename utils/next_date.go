@@ -8,12 +8,13 @@ import (
 )
 
 // NextDate вычисляет следующую дату задачи.
-// Для ежедневного повторения (формат "d N") функция всегда прибавляет интервал в N дней один раз,
-// а затем, при необходимости, повторяет прибавление до тех пор, пока полученная дата не станет больше now.
+// Для ежедневного повторения (формат "d N") прибавляет N дней к дате и, при необходимости,
+// повторяет прибавление, пока полученная дата не станет строго больше указанного now.
 // Для ежегодного повторения ("y"):
-// • Если год исходной даты меньше текущего года, используется год now.
-// • Иначе — используется исходный год плюс один.
-// В случае 29 февраля, если в выбранном году такого дня нет, дата корректируется на 1 марта.
+//   - Если год исходной даты меньше now.Year(), используется now.Year(), иначе – date.Year()+1.
+//   - Если полученная дата не больше now, прибавляется ещё один год.
+//
+// В случае 29 февраля, если в выбранном году такого дня нет, можно (при необходимости) скорректировать дату.
 func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 	if repeat == "" {
 		return "", fmt.Errorf("правило повторения не указано")
@@ -24,7 +25,6 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		return "", fmt.Errorf("некорректная дата: %v", err)
 	}
 
-	// Обрезаем время до начала дня
 	now = now.Truncate(24 * time.Hour)
 	date = date.Truncate(24 * time.Hour)
 
@@ -37,9 +37,8 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		if err != nil || days < 1 || days > 400 {
 			return "", fmt.Errorf("недопустимое число дней: %s", parts[1])
 		}
-		// Всегда прибавляем минимум один шаг
+		// Начинаем с date + days, чтобы вернуть значение, строго больше заданной даты.
 		next := date.AddDate(0, 0, days)
-		// Если полученная дата всё ещё не больше now, прибавляем интервал циклически
 		for !next.After(now) {
 			next = next.AddDate(0, 0, days)
 		}
@@ -47,17 +46,15 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 
 	} else if repeat == "y" {
 		var targetYear int
-		// Если год исходной даты меньше текущего, используем now.Year()
 		if date.Year() < now.Year() {
 			targetYear = now.Year()
 		} else {
 			targetYear = date.Year() + 1
 		}
-		// Корректировка для 29 февраля
-		if date.Month() == time.February && date.Day() == 29 && !isLeap(targetYear) {
-			return time.Date(targetYear, time.March, 1, 0, 0, 0, 0, time.UTC).Format("20060102"), nil
-		}
 		next := time.Date(targetYear, date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+		if !next.After(now) {
+			next = next.AddDate(1, 0, 0)
+		}
 		return next.Format("20060102"), nil
 
 	} else {
