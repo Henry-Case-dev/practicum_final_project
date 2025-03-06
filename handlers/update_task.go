@@ -14,15 +14,15 @@ import (
 // HandleUpdateTask обновляет существующую задачу.
 // Для валидации даты используется значение параметра now из запроса.
 // Если правило повторения указано, то date должна быть равна now; для не повторяющихся задач,
-// если переданная дата меньше now, она заменяется на now.
-// (Важно: при редактировании задачи не вычисляется следующий срок для повторяющихся задач.)
+// если переданная дата меньше now, возвращается ошибка.
+// (Вычисление следующей даты происходит только в HandleTaskDone.)
 func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		utils.RespondError(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Логируем полное содержимое запроса.
+	// Логируем полный запрос.
 	log.Printf("DEBUG (UpdateTask): RawQuery=%s", r.URL.RawQuery)
 	if err := r.ParseForm(); err == nil {
 		log.Printf("DEBUG: URL.Query() = %+v", r.URL.Query())
@@ -50,7 +50,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем now из запроса через FormValue.
+	// Получаем параметр now из запроса.
 	nowParam := r.FormValue("now")
 	if nowParam == "" {
 		log.Printf("DEBUG (UpdateTask): Отсутствует параметр now. RawQuery=%s, Form=%v", r.URL.RawQuery, r.Form)
@@ -65,7 +65,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("DEBUG (UpdateTask): now=%s", now.Format("20060102"))
 
-	// Если поле date пустое – используем значение now.
+	// Если поле date пустое – устанавливаем его равным now.
 	if task.Date == "" {
 		task.Date = now.Format("20060102")
 		log.Printf("DEBUG (UpdateTask): date not provided, set to now=%s", task.Date)
@@ -77,15 +77,15 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Валидация даты:
-	// Если правило повторения указано, то date должна быть равна now.
-	// Иначе, если переданная дата меньше now, заменяем её на now.
 	if task.Repeat != "" {
+		// Для повторяющихся задач date должна равняться now.
 		if task.Date != now.Format("20060102") {
 			log.Printf("DEBUG (UpdateTask): repeat task but date (%s) != now (%s)", task.Date, now.Format("20060102"))
 			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
 			return
 		}
 	} else {
+		// Для не повторяющихся задач, если переданная дата меньше now, заменяем её на now.
 		parsedDate, _ := time.Parse("20060102", task.Date)
 		if parsedDate.Before(now) {
 			log.Printf("DEBUG (UpdateTask): non-repeat task, date (%s) is before now (%s); replacing with now", task.Date, now.Format("20060102"))
@@ -105,10 +105,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Важно: при редактировании повторяющейся задачи не вычисляем следующий срок,
-	// а сохраняем переданное значение (которое должно быть равно now).
-	// (Вычисление следующей даты происходит только в HandleTaskDone.)
-
+	// Сохраняем полученные параметры без изменения даты.
 	_, err = DB.Exec(
 		`UPDATE scheduler SET date = ?, title = ?, comment = ?, repeat = ? WHERE id = ?`,
 		task.Date, task.Title, task.Comment, task.Repeat, id,

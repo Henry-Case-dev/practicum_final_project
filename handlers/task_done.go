@@ -11,8 +11,8 @@ import (
 )
 
 // HandleTaskDone обрабатывает отметку о выполнении задачи.
-// Параметр now обязателен – время из запроса (формат "20060102").
-// Если задача повторяется, вычисляется следующая дата (на основе now + правило);
+// Параметр now больше не берётся из запроса – используется текущее время.
+// Если задача повторяется, вычисляется следующая дата (на основе currentTime + правило);
 // для разовых задач запись удаляется.
 func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -20,7 +20,7 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Логируем полное содержимое запроса.
+	// Логируем содержимое запроса.
 	log.Printf("DEBUG (TaskDone): RawQuery=%s", r.URL.RawQuery)
 	if err := r.ParseForm(); err == nil {
 		log.Printf("DEBUG (TaskDone): Form=%v", r.Form)
@@ -32,24 +32,12 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем параметр now через FormValue.
-	nowParam := r.FormValue("now")
-	if nowParam == "" {
-		log.Printf("DEBUG (TaskDone): Отсутствует параметр now. RawQuery=%s, Form=%v", r.URL.RawQuery, r.Form)
-		utils.RespondError(w, "Отсутствует параметр now", http.StatusBadRequest)
-		return
-	}
-	log.Printf("DEBUG (TaskDone): received nowParam=%s", nowParam)
-	now, err := time.Parse("20060102", nowParam)
-	if err != nil {
-		log.Printf("DEBUG (TaskDone): Неверный формат параметра now. RawQuery=%s, Form=%v", r.URL.RawQuery, r.Form)
-		utils.RespondError(w, "Неверный формат параметра now", http.StatusBadRequest)
-		return
-	}
-	log.Printf("DEBUG (TaskDone): now=%s", now.Format("20060102"))
+	// Используем текущее локальное время, обрезанное до начала дня, как currentTime.
+	currentTime := time.Now().Local().Truncate(24 * time.Hour)
+	log.Printf("DEBUG (TaskDone): currentTime=%s", currentTime.Format("20060102"))
 
 	var task models.Task
-	err = DB.QueryRow(
+	err := DB.QueryRow(
 		`SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?`,
 		id,
 	).Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat)
@@ -63,15 +51,15 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("DEBUG (TaskDone): task retrieved, id=%s, date=%s, repeat=%s", id, task.Date, task.Repeat)
 
-	// Если задача повторяется – проверяем, что дата из БД равна now.
 	if task.Repeat != "" {
-		if task.Date != now.Format("20060102") {
-			log.Printf("DEBUG (TaskDone): повторяющаяся задача, но date (%s) не равна now (%s)", task.Date, now.Format("20060102"))
+		// Для повторяющихся задач требуем, чтобы date совпадало с currentTime.
+		if task.Date != currentTime.Format("20060102") {
+			log.Printf("DEBUG (TaskDone): повторяющаяся задача, но date (%s) не равна currentTime (%s)", task.Date, currentTime.Format("20060102"))
 			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
 			return
 		}
-		// Вычисляем следующую дату относительно now.
-		nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
+		// Вычисляем следующую дату относительно currentTime.
+		nextDate, err := utils.NextDate(currentTime, task.Date, task.Repeat)
 		if err != nil {
 			utils.RespondError(w, err.Error(), http.StatusBadRequest)
 			return

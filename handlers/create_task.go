@@ -12,8 +12,9 @@ import (
 )
 
 // HandleCreateTask обрабатывает создание новой задачи.
-// Если поле date отсутствует или пустое, то берётся значение параметра now из запроса (формат "20060102").
-// При наличии правила повторения дата должна быть равна now, иначе возвращается ошибка.
+// Если поле date отсутствует или пустое, то используется текущее время (формат "20060102").
+// При наличии правила повторения поле date должно быть равно сегодняшней, иначе возвращается ошибка.
+// Для не повторяющихся задач, если переданная дата меньше сегодняшней, возвращается ошибка.
 func HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		utils.RespondError(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
@@ -30,44 +31,34 @@ func HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем now из запроса.
-	nowParam := r.URL.Query().Get("now")
-	if nowParam == "" {
-		utils.RespondError(w, "Отсутствует параметр now", http.StatusBadRequest)
-		return
-	}
-	now, err := time.Parse("20060102", nowParam)
-	if err != nil {
-		utils.RespondError(w, "Неверный формат параметра now", http.StatusBadRequest)
-		return
-	}
-	log.Printf("DEBUG (CreateTask): now=%s", now.Format("20060102"))
+	// Используем текущее локальное время, обрезанное до начала дня, как today.
+	today := time.Now().Local().Truncate(24 * time.Hour)
+	log.Printf("DEBUG (CreateTask): today=%s", today.Format("20060102"))
 
-	// Если поле date пустое – используем значение now.
+	// Обработка даты:
 	if task.Date == "" {
-		task.Date = now.Format("20060102")
-		log.Printf("DEBUG (CreateTask): date not provided, set to now=%s", task.Date)
+		task.Date = today.Format("20060102")
+		log.Printf("DEBUG (CreateTask): date not provided, set to today=%s", task.Date)
 	} else {
-		if _, err := time.Parse("20060102", task.Date); err != nil {
+		parsedDate, err := time.Parse("20060102", task.Date)
+		if err != nil {
 			utils.RespondError(w, "Неверный формат даты", http.StatusBadRequest)
 			return
 		}
-	}
-
-	// При наличии правила повторения дата должна быть равна now.
-	if task.Repeat != "" {
-		if task.Date != now.Format("20060102") {
-			log.Printf("DEBUG (CreateTask): repeat task but date (%s) != now (%s)", task.Date, now.Format("20060102"))
-			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
-			return
-		}
-	} else {
-		// Если правило отсутствует и date меньше now – выдаём ошибку.
-		parsedDate, _ := time.Parse("20060102", task.Date)
-		if parsedDate.Before(now) {
-			log.Printf("DEBUG (CreateTask): non-repeat task but date (%s) < now (%s)", task.Date, now.Format("20060102"))
-			utils.RespondError(w, "Дата не может быть меньше сегодняшней", http.StatusBadRequest)
-			return
+		if task.Repeat != "" {
+			// Для повторяющихся задач date должно совпадать с today.
+			if task.Date != today.Format("20060102") {
+				log.Printf("DEBUG (CreateTask): repeat task but date (%s) != today (%s)", task.Date, today.Format("20060102"))
+				utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
+				return
+			}
+		} else {
+			// Для не повторяющихся задач, если дата меньше today, возвращаем ошибку.
+			if parsedDate.Before(today) {
+				log.Printf("DEBUG (CreateTask): non-repeat task but date (%s) < today (%s)", task.Date, today.Format("20060102"))
+				utils.RespondError(w, "Дата не может быть меньше сегодняшней", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 
