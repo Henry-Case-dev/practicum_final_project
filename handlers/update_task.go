@@ -12,17 +12,16 @@ import (
 )
 
 // HandleUpdateTask обновляет существующую задачу.
-// Для валидации даты используется значение параметра now из запроса.
-// Если правило повторения указано, то date должна быть равна now; для не повторяющихся задач,
-// если переданная дата меньше now, возвращается ошибка.
-// (Вычисление следующей даты происходит только в HandleTaskDone.)
+// В данной функции проверяется входной JSON, валидируются параметры (в том числе дата),
+// затем производится обновление записи в базе данных.
 func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
+		// Если метод не PUT, отправляем ошибку
 		utils.RespondError(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Логируем полный запрос.
+	// Логируем сырой запрос для отладки
 	log.Printf("DEBUG (UpdateTask): RawQuery=%s", r.URL.RawQuery)
 	if err := r.ParseForm(); err == nil {
 		log.Printf("DEBUG: URL.Query() = %+v", r.URL.Query())
@@ -30,11 +29,13 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var task models.Task
+	// Декодирование JSON-тела запроса
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
 		utils.RespondError(w, "Неверный формат JSON", http.StatusBadRequest)
 		return
 	}
 
+	// Проверяем обязательные поля
 	if task.ID == "" {
 		utils.RespondError(w, "Не указан идентификатор", http.StatusBadRequest)
 		return
@@ -44,13 +45,14 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Преобразуем id в числовое значение
 	id, err := strconv.ParseInt(task.ID, 10, 64)
 	if err != nil {
 		utils.RespondError(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
 
-	// Получаем параметр now из запроса.
+	// Извлекаем параметр now из формы (ожидаемый формат "20060102")
 	nowParam := r.FormValue("now")
 	if nowParam == "" {
 		log.Printf("DEBUG (UpdateTask): Отсутствует параметр now. RawQuery=%s, Form=%v", r.URL.RawQuery, r.Form)
@@ -65,27 +67,28 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("DEBUG (UpdateTask): now=%s", now.Format("20060102"))
 
-	// Если поле date пустое – устанавливаем его равным now.
+	// Если дата не указана – используем значение параметра now
 	if task.Date == "" {
 		task.Date = now.Format("20060102")
 		log.Printf("DEBUG (UpdateTask): date not provided, set to now=%s", task.Date)
 	} else {
+		// Проверяем формат даты
 		if _, err := time.Parse("20060102", task.Date); err != nil {
 			utils.RespondError(w, "Неверный формат даты", http.StatusBadRequest)
 			return
 		}
 	}
 
-	// Валидация даты:
+	// Валидация даты в зависимости от типа задачи (повторяющаяся или нет)
 	if task.Repeat != "" {
-		// Для повторяющихся задач date должна равняться now.
+		// Для повторяющихся задач дата должна быть равна now
 		if task.Date != now.Format("20060102") {
 			log.Printf("DEBUG (UpdateTask): repeat task but date (%s) != now (%s)", task.Date, now.Format("20060102"))
 			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
 			return
 		}
 	} else {
-		// Для не повторяющихся задач, если переданная дата меньше now, заменяем её на now.
+		// Для не повторяющихся задач, если указанная дата меньше now, заменяем её
 		parsedDate, _ := time.Parse("20060102", task.Date)
 		if parsedDate.Before(now) {
 			log.Printf("DEBUG (UpdateTask): non-repeat task, date (%s) is before now (%s); replacing with now", task.Date, now.Format("20060102"))
@@ -93,7 +96,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Проверяем наличие задачи.
+	// Проверяем, существует ли задача с данным идентификатором
 	var exists bool
 	err = DB.QueryRow("SELECT EXISTS(SELECT 1 FROM scheduler WHERE id = ?)", id).Scan(&exists)
 	if err != nil {
@@ -105,7 +108,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сохраняем полученные параметры без изменения даты.
+	// Обновляем запись в базе данных с новыми значениями
 	_, err = DB.Exec(
 		`UPDATE scheduler SET date = ?, title = ?, comment = ?, repeat = ? WHERE id = ?`,
 		task.Date, task.Title, task.Comment, task.Repeat, id,
@@ -115,6 +118,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Логируем успешное обновление задачи
 	log.Printf("DEBUG (UpdateTask): task id=%d updated successfully, new date=%s", id, task.Date)
 	utils.RespondJSON(w, map[string]interface{}{})
 }

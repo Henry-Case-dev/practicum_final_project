@@ -11,32 +11,34 @@ import (
 )
 
 // HandleTaskDone обрабатывает отметку о выполнении задачи.
-// Параметр now больше не берётся из запроса – используется текущее время.
-// Если задача повторяется, вычисляется следующая дата (на основе currentTime + правило);
+// В данной функции используется текущее время (currentTime), и если задача повторяется – вычисляется следующая дата;
 // для разовых задач запись удаляется.
 func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		// Если метод не POST, возвращаем ошибку
 		utils.RespondError(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Логируем содержимое запроса.
+	// Логируем содержимое запроса для отладки
 	log.Printf("DEBUG (TaskDone): RawQuery=%s", r.URL.RawQuery)
 	if err := r.ParseForm(); err == nil {
 		log.Printf("DEBUG (TaskDone): Form=%v", r.Form)
 	}
 
+	// Извлекаем идентификатор задачи
 	id := r.FormValue("id")
 	if id == "" {
 		utils.RespondError(w, "Не указан идентификатор", http.StatusBadRequest)
 		return
 	}
 
-	// Используем текущее локальное время, обрезанное до начала дня, как currentTime.
+	// Устанавливаем текущее время, обрезая его до полуночи
 	currentTime := time.Now().Local().Truncate(24 * time.Hour)
 	log.Printf("DEBUG (TaskDone): currentTime=%s", currentTime.Format("20060102"))
 
 	var task models.Task
+	// Получаем данные задачи из базы данных
 	err := DB.QueryRow(
 		`SELECT id, date, title, comment, repeat FROM scheduler WHERE id = ?`,
 		id,
@@ -51,8 +53,8 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("DEBUG (TaskDone): task retrieved, id=%s, date=%s, repeat=%s", id, task.Date, task.Repeat)
 
+	// Если задача повторяется – вычисляем следующую дату и обновляем запись
 	if task.Repeat != "" {
-		// Вычисляем следующую дату относительно currentTime.
 		nextDate, err := utils.NextDate(currentTime, task.Date, task.Repeat)
 		if err != nil {
 			utils.RespondError(w, err.Error(), http.StatusBadRequest)
@@ -65,7 +67,7 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// Для разовых задач — удаляем запись.
+		// Для разовых задач удаляем запись из базы
 		_, err = DB.Exec("DELETE FROM scheduler WHERE id = ?", id)
 		if err != nil {
 			utils.RespondError(w, "Ошибка базы данных: "+err.Error(), http.StatusInternalServerError)
@@ -73,5 +75,6 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Отправляем успешный ответ
 	utils.RespondJSON(w, map[string]interface{}{})
 }

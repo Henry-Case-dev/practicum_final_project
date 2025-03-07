@@ -10,13 +10,15 @@ import (
 	"practicum_final_project/utils"
 )
 
-// HandleTasks обрабатывает получение списка задач
+// HandleTasks обрабатывает запрос на получение списка задач.
 func HandleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
+		// Если метод не GET, возвращаем ошибку
 		utils.RespondError(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Получаем параметр поиска
 	search := r.URL.Query().Get("search")
 	limit := 50
 
@@ -24,6 +26,7 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if search != "" {
+		// Если поиск можно интерпретировать как дату, пытаемся преобразовать ее
 		if date, err := time.Parse("02.01.2006", search); err == nil {
 			search = date.Format("20060102")
 			rows, err = DB.Query(
@@ -34,6 +37,7 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 				search, limit,
 			)
 		} else {
+			// Иначе используем шаблон для поиска по заголовку и комментарию
 			searchPattern := "%" + search + "%"
 			rows, err = DB.Query(
 				`SELECT id, date, title, comment, repeat 
@@ -44,6 +48,7 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 	} else {
+		// Если поиск не задан, просто выбираем первые limit записей
 		rows, err = DB.Query(
 			`SELECT id, date, title, comment, repeat 
             FROM scheduler 
@@ -58,10 +63,12 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// Формируем срез задач
 	tasks := make([]models.Task, 0)
 	for rows.Next() {
 		var task models.Task
 		var id int64
+		// Сканируем строку результата в переменные
 		err := rows.Scan(&id, &task.Date, &task.Title, &task.Comment, &task.Repeat)
 		if err != nil {
 			utils.RespondError(w, "Ошибка чтения данных", http.StatusInternalServerError)
@@ -71,5 +78,6 @@ func HandleTasks(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, task)
 	}
 
+	// Возвращаем задачи в виде JSON
 	utils.RespondJSON(w, map[string][]models.Task{"tasks": tasks})
 }
