@@ -11,14 +11,14 @@ import (
 )
 
 func main() {
-	// Получаем рабочий каталог
-	appPath, err := os.Getwd()
+	// Получаем путь к исполняемому файлу
+	exePath, err := os.Executable()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Формируем путь к базе данных (scheduler.db должен находиться в корне проекта)
-	dbPath := filepath.Join(appPath, "scheduler.db")
+	// Формируем путь к базе данных (scheduler.db должен находиться в родительской директории исполняемого файла)
+	dbPath := filepath.Join(filepath.Dir(exePath), "scheduler.db")
 
 	// Инициализируем БД
 	if err := database.Init(dbPath); err != nil {
@@ -29,8 +29,8 @@ func main() {
 	// Инициализируем handlers с подключением к БД
 	handlers.InitDB(database.DB)
 
-	// Формируем путь к директории web (корень проекта)
-	webDir := filepath.Join(appPath, "web")
+	// Формируем путь к директории web (находится в родительской директории исполняемого файла)
+	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); err != nil {
 		log.Fatalf("Ошибка: директория web не найдена")
 	}
@@ -43,7 +43,6 @@ func main() {
 	http.HandleFunc("/api/tasks", handlers.HandleTasks)
 	http.HandleFunc("/api/nextdate", handlers.HandleNextDate)
 	http.HandleFunc("/api/task/done", handlers.HandleTaskDone)
-	http.HandleFunc("/api/task/delete", handlers.HandleDeleteTask)
 
 	// Определяем порт
 	port := os.Getenv("TODO_PORT")

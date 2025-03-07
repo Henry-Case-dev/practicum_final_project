@@ -74,16 +74,17 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if task.Repeat != "" {
-		nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
-		if err != nil {
-			utils.RespondError(w, err.Error(), http.StatusBadRequest)
-			return
+	if parsedDate.Before(now) {
+		if task.Repeat != "" {
+			nextDate, err := utils.NextDate(now, task.Date, task.Repeat)
+			if err != nil {
+				utils.RespondError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			task.Date = nextDate
+		} else {
+			task.Date = now.Format("20060102")
 		}
-		task.Date = nextDate
-	} else if parsedDate.Before(now) {
-		// Если правило повторения не указано, заменяем дату на сегодняшнюю
-		task.Date = now.Format("20060102")
 	}
 
 	result, err := DB.Exec(

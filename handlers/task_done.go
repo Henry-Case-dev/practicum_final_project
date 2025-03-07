@@ -52,12 +52,6 @@ func HandleTaskDone(w http.ResponseWriter, r *http.Request) {
 	log.Printf("DEBUG (TaskDone): task retrieved, id=%s, date=%s, repeat=%s", id, task.Date, task.Repeat)
 
 	if task.Repeat != "" {
-		// Для повторяющихся задач требуем, чтобы date совпадало с currentTime.
-		if task.Date != currentTime.Format("20060102") {
-			log.Printf("DEBUG (TaskDone): повторяющаяся задача, но date (%s) не равна currentTime (%s)", task.Date, currentTime.Format("20060102"))
-			utils.RespondError(w, "Дата должна быть сегодняшняя", http.StatusBadRequest)
-			return
-		}
 		// Вычисляем следующую дату относительно currentTime.
 		nextDate, err := utils.NextDate(currentTime, task.Date, task.Repeat)
 		if err != nil {
