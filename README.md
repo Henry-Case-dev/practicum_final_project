@@ -25,13 +25,13 @@
 1. Проверьте файл `tests/settings.go` – можно задать следующие параметры:
    - Port: 7540
    - DBFile: ../scheduler.db
-   - FullNextDate: false (или true, если требуется проверка расширенного функционала)
+   - FullNextDate: false
    - Search: false
-   - Token: (оставьте пустым, если авторизация не используется)
+   - Token: (оставьте пустым)
 2. Запустите тесты командой:
    ```
    go test -count=1 ./tests
    ```
 
-## Docker (при наличии)
+## Docker
 Dockerfile и docker-compose не создавался
