@@ -19,14 +19,14 @@ func HandleNextDate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Парсим параметр now согласно формату "20060102"
-	now, err := time.Parse("20060102", nowParam)
+	now, err := utils.ParseDateString(nowParam)
 	if err != nil {
 		utils.RespondError(w, "Неверный формат параметра now", http.StatusBadRequest)
 		return
 	}
 
-	// Обязательно используем UTC
-	now = now.UTC().Truncate(24 * time.Hour)
+	// Принудительно используем AppTimeZone для согласованности обработки
+	now = now.In(utils.AppTimeZone).Truncate(24 * time.Hour)
 
 	// Вычисляем следующую дату с использованием функции NextDate
 	next, err := utils.NextDate(now, date, repeat)

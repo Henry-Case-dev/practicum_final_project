@@ -8,6 +8,29 @@ import (
 	"time"
 )
 
+// AppTimeZone - фиксированный часовой пояс для работы с датами.
+// Используется для обеспечения согласованности независимо от системного часового пояса.
+var AppTimeZone = time.UTC
+
+// StartOfDay возвращает дату с нулевым временем (00:00:00) в указанном часовом поясе
+func StartOfDay(t time.Time) time.Time {
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, AppTimeZone)
+}
+
+// ParseDateString преобразует строку даты в формате "YYYYMMDD" в time.Time
+func ParseDateString(dateStr string) (time.Time, error) {
+	// Парсим дату без учета часового пояса
+	t, err := time.Parse("20060102", dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// Извлекаем компоненты даты и создаем новый объект time.Time с нулевым временем в AppTimeZone
+	year, month, day := t.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, AppTimeZone), nil
+}
+
 // NextDate вычисляет следующую дату задачи.
 // now – переданное время (из параметра now запроса), dateStr – исходная дата задачи,
 // repeat поддерживает два формата: "d N" – для ежедневного повторения и "y" – для ежегодного.
@@ -17,16 +40,14 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		return "", fmt.Errorf("правило повторения не указано")
 	}
 
-	// Обязательно используем UTC для устранения проблем с часовыми поясами
-	now = now.UTC().Truncate(24 * time.Hour)
+	// Устанавливаем начало дня для now
+	now = StartOfDay(now)
 
-	date, err := time.Parse("20060102", dateStr)
+	// Парсим и обрабатываем дату
+	date, err := ParseDateString(dateStr)
 	if err != nil {
 		return "", fmt.Errorf("некорректная дата: %v", err)
 	}
-
-	// Обязательно используем UTC для всех дат
-	date = date.UTC().Truncate(24 * time.Hour)
 
 	if strings.HasPrefix(repeat, "d ") {
 		parts := strings.Split(repeat, " ")
@@ -62,7 +83,7 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		} else {
 			targetYear = date.Year() + 1
 		}
-		next := time.Date(targetYear, date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+		next := time.Date(targetYear, date.Month(), date.Day(), 0, 0, 0, 0, AppTimeZone)
 		log.Printf("DEBUG (NextDate): rule y: initial next=%s", next.Format("20060102"))
 		if !next.After(now) {
 			next = next.AddDate(1, 0, 0)

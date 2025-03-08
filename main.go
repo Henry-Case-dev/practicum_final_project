@@ -9,12 +9,16 @@ import (
 
 	"practicum_final_project/database"
 	"practicum_final_project/handlers"
+	"practicum_final_project/utils"
 )
 
 func main() {
+	// НЕ устанавливаем глобальный часовой пояс - используем AppTimeZone в utils
+	// time.Local = time.UTC
+
 	// Логируем информацию о системном времени и часовом поясе
-	log.Printf("Системное время: %v, Часовой пояс: %v, UTC: %v",
-		time.Now(), time.Now().Location(), time.Now().UTC())
+	log.Printf("Системное время: %v, Часовой пояс: %v, UTC: %v, AppTimeZone: %v",
+		time.Now(), time.Now().Location(), time.Now().UTC(), time.Now().In(utils.AppTimeZone))
 
 	// Получаем путь к исполняемому файлу
 	exePath, err := os.Executable()

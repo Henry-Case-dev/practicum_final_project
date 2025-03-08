@@ -74,22 +74,20 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Определяем текущую дату (UTC, обрезая время до полуночи)
-	now := time.Now().UTC().Truncate(24 * time.Hour)
+	// Определяем текущую дату с фиксированным часовым поясом
+	now := utils.StartOfDay(time.Now())
+
 	// Если дата не указана, используем сегодняшнюю
 	if task.Date == "" {
 		task.Date = now.Format("20060102")
 	}
 
 	// Парсим переданную дату
-	parsedDate, err := time.Parse("20060102", task.Date)
+	parsedDate, err := utils.ParseDateString(task.Date)
 	if err != nil {
 		utils.RespondError(w, "Неверный формат даты", http.StatusBadRequest)
 		return
 	}
-
-	// Обязательно используем UTC для переданной даты
-	parsedDate = parsedDate.UTC().Truncate(24 * time.Hour)
 
 	// Если дата в прошлом – для повторяющихся задач вычисляем следующую, для разовых задаем сегодняшнюю
 	if parsedDate.Before(now) {
