@@ -23,7 +23,7 @@ func main() {
 	// Получаем путь к исполняемому файлу
 	exePath, err := os.Executable()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Ошибка получения пути к исполняемому файлу: %v", err)
 	}
 
 	// Формируем путь к базе данных (scheduler.db должен находиться в родительской директории исполняемого файла)
@@ -41,7 +41,7 @@ func main() {
 	// Формируем путь к директории web (находится в родительской директории исполняемого файла)
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); err != nil {
-		log.Fatalf("Ошибка: директория web не найдена")
+		log.Fatalf("Ошибка: директория web не найдена: %v", err)
 	}
 
 	// Файловый сервер для фронтенда
@@ -59,5 +59,9 @@ func main() {
 		port = "7540"
 	}
 	log.Printf("Сервер запущен на порту %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+
+	// Запускаем сервер и обрабатываем ошибку
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Ошибка запуска сервера: %v", err)
+	}
 }

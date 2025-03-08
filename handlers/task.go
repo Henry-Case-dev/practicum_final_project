@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -103,18 +104,24 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Сохраняем задачу в базе данных
-	result, err := DB.Exec(
-		`INSERT INTO scheduler (date, title, comment, repeat) VALUES (?, ?, ?, ?)`,
-		task.Date, task.Title, task.Comment, task.Repeat,
-	)
+	// Выполняем запрос INSERT для создания новой задачи
+	result, err := DB.Exec(`
+        INSERT INTO scheduler (date, title, comment, repeat)
+        VALUES (?, ?, ?, ?)
+    `, task.Date, task.Title, task.Comment, task.Repeat)
 	if err != nil {
+		log.Printf("Ошибка при создании задачи: %v", err)
 		utils.RespondError(w, "Ошибка базы данных: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Получаем сгенерированный идентификатор задачи и отправляем его в ответе
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("Не удалось получить id задачи: %v", err)
+		utils.RespondError(w, "Не удалось получить id задачи", http.StatusInternalServerError)
+		return
+	}
 	utils.RespondJSON(w, map[string]string{"id": strconv.FormatInt(id, 10)})
 }
 
@@ -201,12 +208,18 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// Выполняем операцию удаления в базе данных
 	result, err := DB.Exec(`DELETE FROM scheduler WHERE id = ?`, id)
 	if err != nil {
+		log.Printf("Ошибка при удалении задачи: %v", err)
 		utils.RespondError(w, "Ошибка базы данных: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Если запись не была найдена, отправляем ошибку
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Ошибка при получении количества затронутых строк: %v", err)
+		utils.RespondError(w, "Ошибка базы данных: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if affected == 0 {
 		utils.RespondError(w, "Задача не найдена", http.StatusNotFound)
 		return
@@ -214,17 +227,4 @@ func handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Отправляем пустой JSON-ответ
 	utils.RespondJSON(w, map[string]interface{}{})
-}
-
-// RespondError отправляет JSON-ответ с сообщением об ошибке.
-func RespondError(w http.ResponseWriter, message string, code int) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
-}
-
-// RespondJSON отправляет JSON-ответ.
-func RespondJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	json.NewEncoder(w).Encode(data)
 }

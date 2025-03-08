@@ -30,6 +30,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var task models.Task
 	// Декодирование JSON-тела запроса
 	if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+		log.Printf("Ошибка декодирования JSON: %v", err)
 		utils.RespondError(w, "Неверный формат JSON", http.StatusBadRequest)
 		return
 	}
@@ -47,6 +48,7 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Преобразуем id в числовое значение
 	id, err := strconv.ParseInt(task.ID, 10, 64)
 	if err != nil {
+		log.Printf("Некорректный идентификатор: %v", err)
 		utils.RespondError(w, "Некорректный идентификатор", http.StatusBadRequest)
 		return
 	}
