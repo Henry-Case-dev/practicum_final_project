@@ -65,6 +65,9 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		utils.RespondError(w, "Неверный формат параметра now", http.StatusBadRequest)
 		return
 	}
+
+	// Обязательно используем UTC
+	now = now.UTC().Truncate(24 * time.Hour)
 	log.Printf("DEBUG (UpdateTask): now=%s", now.Format("20060102"))
 
 	// Если дата не указана – используем значение параметра now
@@ -73,10 +76,13 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DEBUG (UpdateTask): date not provided, set to now=%s", task.Date)
 	} else {
 		// Проверяем формат даты
-		if _, err := time.Parse("20060102", task.Date); err != nil {
+		parsedDate, err := time.Parse("20060102", task.Date)
+		if err != nil {
 			utils.RespondError(w, "Неверный формат даты", http.StatusBadRequest)
 			return
 		}
+		// Привести к UTC
+		parsedDate = parsedDate.UTC().Truncate(24 * time.Hour)
 	}
 
 	// Валидация даты в зависимости от типа задачи (повторяющаяся или нет)
@@ -90,6 +96,8 @@ func HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Для не повторяющихся задач, если указанная дата меньше now, заменяем её
 		parsedDate, _ := time.Parse("20060102", task.Date)
+		// Приводим к UTC
+		parsedDate = parsedDate.UTC().Truncate(24 * time.Hour)
 		if parsedDate.Before(now) {
 			log.Printf("DEBUG (UpdateTask): non-repeat task, date (%s) is before now (%s); replacing with now", task.Date, now.Format("20060102"))
 			task.Date = now.Format("20060102")

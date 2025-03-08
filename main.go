@@ -5,12 +5,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"practicum_final_project/database"
 	"practicum_final_project/handlers"
 )
 
 func main() {
+	// Логируем информацию о системном времени и часовом поясе
+	log.Printf("Системное время: %v, Часовой пояс: %v, UTC: %v",
+		time.Now(), time.Now().Location(), time.Now().UTC())
+
 	// Получаем путь к исполняемому файлу
 	exePath, err := os.Executable()
 	if err != nil {

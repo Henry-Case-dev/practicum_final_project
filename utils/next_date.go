@@ -17,13 +17,16 @@ func NextDate(now time.Time, dateStr, repeat string) (string, error) {
 		return "", fmt.Errorf("правило повторения не указано")
 	}
 
+	// Обязательно используем UTC для устранения проблем с часовыми поясами
+	now = now.UTC().Truncate(24 * time.Hour)
+
 	date, err := time.Parse("20060102", dateStr)
 	if err != nil {
 		return "", fmt.Errorf("некорректная дата: %v", err)
 	}
 
-	now = now.Truncate(24 * time.Hour)
-	date = date.Truncate(24 * time.Hour)
+	// Обязательно используем UTC для всех дат
+	date = date.UTC().Truncate(24 * time.Hour)
 
 	if strings.HasPrefix(repeat, "d ") {
 		parts := strings.Split(repeat, " ")

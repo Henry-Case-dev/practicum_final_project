@@ -88,6 +88,9 @@ func handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Обязательно используем UTC для переданной даты
+	parsedDate = parsedDate.UTC().Truncate(24 * time.Hour)
+
 	// Если дата в прошлом – для повторяющихся задач вычисляем следующую, для разовых задаем сегодняшнюю
 	if parsedDate.Before(now) {
 		if task.Repeat != "" {
